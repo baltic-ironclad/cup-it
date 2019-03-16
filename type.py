@@ -3,10 +3,11 @@ import os
 import pandas as pd
 import numpy as np
 
+from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.linear_model import SGDClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn import metrics
@@ -17,12 +18,9 @@ df_test = pd.read_csv(os.path.join('data', 'test_n.csv'), encoding='utf-8')
 cv = CountVectorizer()
 analyzer = cv.build_analyzer()
 
-stop_words = ['не']
-
 sentences = df_train['text'].values
 y = df_train['type'].values
 classes = list(set(y))
-
 
 testing = False
 # Тут разбиваю тренировочные данные в соотношении 9:1, это необходимо, чтобы проверять работоспособность сети.
@@ -33,27 +31,42 @@ else:
     sentences_train, y_train = sentences, y
 sentences_test = df_test['text'].values
 
-vectorizer = TfidfVectorizer(min_df=10, ngram_range=(1, 1))
+vectorizer = TfidfVectorizer(min_df=10, ngram_range=(1, 1), stop_words=stopwords.words('russian'))
 
+"""
 clf = Pipeline([
-('vect', vectorizer),
-# ('tfidf', TfidfTransformer()),
-('clf', SGDClassifier()),
+    ('vect', vectorizer),
+    ('tfidf', TfidfTransformer()),
+    ('clf', SGDClassifier()),
 ])
+"""
 
-clf.fit(sentences_train, y_train)
+tf_idf_model = vectorizer.fit(np.concatenate([df_train.text, df_test.text]))
+train_tfidf_vec = tf_idf_model.transform(df_train.text)
+test_tfidf_vec = tf_idf_model.transform(df_test.text)
 
-print(len(vectorizer.vocabulary_))
+classifier = LogisticRegression(solver='liblinear')
+classifier_params = {
+    'C': [0.001, 0.01, 0.1, 1, 2, 5, 10, 20, 100]
+}
+classifier_search = GridSearchCV(
+    estimator=classifier, param_grid=classifier_params
+)
+classifier_fitted = classifier_search.fit(X=sentences_train, y=y_train)
 
-acc = clf.score(sentences_train, y_train)
-print('Accuracy for train data: {:.4f}'.format(acc))
+
+accuracy = classifier_fitted.score(X=sentences_train, y=y_train)
+print('Accuracy for train data: {:.4f}'.format(accuracy))
 
 if testing:
-    predicted = clf.predict(sentences_score)
-    acc = np.mean(predicted == y_score)
-    print('Accuracy for score data: {:.4f}'.format(acc))
+    predicted = classifier_fitted.predict(sentences_score)
+    accuracy = np.mean(predicted == y_score)
+    print('Accuracy for score data: {:.4f}'.format(accuracy))
 
 # print(metrics.classification_report(y_score, predicted, target_names=classes))
-answer = clf.predict(sentences_test)
-df_answer = pd.DataFrame({'type':  answer})
-df_answer.to_csv('answer.csv', index=True)
+answer = classifier_fitted.predict(sentences_test)
+df_answer = pd.DataFrame({
+    'index': range(len(answer)),
+    'type':  answer
+})
+df_answer.to_csv('answer.csv', index=False)
